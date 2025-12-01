@@ -409,9 +409,11 @@ object Implementation extends Template {
             val addr = newEnv(name)
             s + (addr -> CloV(params, expr, newEnv))
           case (s, TypeDef(variants)) =>
-            variants.foldLeft(s) { case (s2, Variant(vname, empty)) =>
+            variants.foldLeft(s) { case (s2, Variant(vname, isNullary)) =>
               val addr = newEnv(vname)
-              if (empty) s2 + (addr -> VariantV(vname, List()))
+              // For nullary constructors (isNullary=true), store VariantV directly
+              // For constructors with params (isNullary=false), store ConstructorV
+              if (isNullary) s2 + (addr -> VariantV(vname, List()))
               else s2 + (addr -> ConstructorV(vname))
             }
         }
