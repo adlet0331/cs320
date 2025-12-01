@@ -95,13 +95,10 @@ object Implementation extends Template {
             // Polymorphic function
             if (targs.isEmpty) error(s"type arguments required for polymorphic function $name")
             
-            // Check if there's a variant constructor with matching type arg count
-            val variantMatch = env.varEnv.get(name).filter { case (_, varTps, _) => varTps.length == targs.length }
-            
             if (targs.length != tps.length) {
               // Type arg count doesn't match the function, check if there's a variant constructor
-              variantMatch match {
-                case Some((typeName, varTps, varParamTypes)) =>
+              env.varEnv.get(name) match {
+                case Some((typeName, varTps, varParamTypes)) if varTps.length == targs.length =>
                   // Variant constructor matches
                   targs.foreach(checkType(_, env))
                   val subst = (varTps zip targs).toMap
@@ -113,25 +110,12 @@ object Implementation extends Template {
                   error(s"wrong number of type arguments for $name")
               }
             } else {
-              // Both function and variant constructor could match
-              // Prefer variant constructor when one exists with matching count
-              variantMatch match {
-                case Some((typeName, varTps, varParamTypes)) =>
-                  // Variant constructor takes precedence (it's a more specific/local binding)
-                  targs.foreach(checkType(_, env))
-                  val subst = (varTps zip targs).toMap
-                  val substParamTypes = varParamTypes.map(substituteType(_, subst))
-                  val resultType = AppT(typeName, targs)
-                  if (varParamTypes.isEmpty) resultType
-                  else ArrowT(substParamTypes, resultType)
-                case None =>
-                  // Only function matches
-                  targs.foreach(checkType(_, env))
-                  val subst = (tps zip targs).toMap
-                  val substParamTypes = paramTypes.map(substituteType(_, subst))
-                  val substRtype = substituteType(rtype, subst)
-                  ArrowT(substParamTypes, substRtype)
-              }
+              // PolyEntry matches - use the function (it's a local/recursive binding)
+              targs.foreach(checkType(_, env))
+              val subst = (tps zip targs).toMap
+              val substParamTypes = paramTypes.map(substituteType(_, subst))
+              val substRtype = substituteType(rtype, subst)
+              ArrowT(substParamTypes, substRtype)
             }
           case None =>
             // Check in variant constructors
@@ -239,6 +223,9 @@ object Implementation extends Template {
           acc + (td.name -> (td.tparams, td.variants.map(v => (v.name, v.params))))
         }
         
+        // Collect variant constructor names from the new types
+        val newConstructorNames = typeDefsToAdd.flatMap(_.variants.map(_.name)).toSet
+        
         // Build variant constructor environment
         val newVarEnv = typeDefsToAdd.foldLeft(env.varEnv) { (acc, td) =>
           td.variants.foldLeft(acc) { (acc2, v) =>
@@ -246,9 +233,13 @@ object Implementation extends Template {
           }
         }
         
+        // Remove constructor names from inherited tenv to allow local constructors to shadow
+        // inherited functions with the same name
+        val shadowedTenv = env.tenv -- newConstructorNames
+        
         // Now collect all recursive definitions (lazy, fun, typedefs)
         // Build their types before checking bodies
-        val envWithTypes = env.copy(tdefEnv = newTdefEnv, varEnv = newVarEnv)
+        val envWithTypes = env.copy(tdefEnv = newTdefEnv, varEnv = newVarEnv, tenv = shadowedTenv)
         
         // Check all variant param types are valid
         typeDefsToAdd.foreach { td =>
