@@ -1,0 +1,28 @@
+{ 
+    def x(y, z) = { 
+        def x(z) = Nil; 
+        3 
+    }; 
+    def y(x, z) = ((x) => z); 
+    ((x) => 2) 
+}.tail
+
+Tail(
+    RecFuns(
+        List(
+            FunDef( x, 
+                    List(y, z),
+                    RecFuns(List(FunDef(x,List(z),NilE)), IntE(3))
+                ), 
+            FunDef(y,List(x, z),Fun(List(x),Id(z)))
+            ),
+            Fun(List(x),IntE(2))
+        )
+)
+
+{ 
+    def x(y, z) = { 
+        y + z
+    };
+    ((x) => 2) 
+}.tail
