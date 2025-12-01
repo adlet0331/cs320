@@ -70,33 +70,82 @@ object Implementation extends Template {
     
     def typeCheck(expr: Expr, env: Env): Type = expr match {
       case Id(name, targs) =>
-        // Check in variant constructors first
-        env.varEnv.get(name) match {
-          case Some((typeName, tps, paramTypes)) =>
-            // It's a variant constructor
-            if (targs.isEmpty && tps.nonEmpty) error(s"type arguments required for $name")
-            if (targs.length != tps.length) error(s"wrong number of type arguments for $name")
-            targs.foreach(checkType(_, env))
-            val subst = (tps zip targs).toMap
-            val substParamTypes = paramTypes.map(substituteType(_, subst))
-            val resultType = AppT(typeName, targs)
-            if (paramTypes.isEmpty) resultType
-            else ArrowT(substParamTypes, resultType)
+        // Check in variable environment first (functions and values take precedence)
+        env.tenv.get(name) match {
+          case Some(SimpleEntry(typ, _)) =>
+            // Simple entry - if type arguments provided, it might be a variant constructor
+            if (targs.nonEmpty) {
+              // Check if there's a variant constructor with this name and matching type arg count
+              env.varEnv.get(name) match {
+                case Some((typeName, tps, paramTypes)) if tps.length == targs.length =>
+                  // It's a variant constructor with matching count
+                  targs.foreach(checkType(_, env))
+                  val subst = (tps zip targs).toMap
+                  val substParamTypes = paramTypes.map(substituteType(_, subst))
+                  val resultType = AppT(typeName, targs)
+                  if (paramTypes.isEmpty) resultType
+                  else ArrowT(substParamTypes, resultType)
+                case _ =>
+                  error(s"non-polymorphic $name cannot take type arguments")
+              }
+            } else {
+              typ
+            }
+          case Some(PolyEntry(tps, paramTypes, rtype)) =>
+            // Polymorphic function
+            if (targs.isEmpty) error(s"type arguments required for polymorphic function $name")
+            
+            // Check if there's a variant constructor with matching type arg count
+            val variantMatch = env.varEnv.get(name).filter { case (_, varTps, _) => varTps.length == targs.length }
+            
+            if (targs.length != tps.length) {
+              // Type arg count doesn't match the function, check if there's a variant constructor
+              variantMatch match {
+                case Some((typeName, varTps, varParamTypes)) =>
+                  // Variant constructor matches
+                  targs.foreach(checkType(_, env))
+                  val subst = (varTps zip targs).toMap
+                  val substParamTypes = varParamTypes.map(substituteType(_, subst))
+                  val resultType = AppT(typeName, targs)
+                  if (varParamTypes.isEmpty) resultType
+                  else ArrowT(substParamTypes, resultType)
+                case _ =>
+                  error(s"wrong number of type arguments for $name")
+              }
+            } else {
+              // Both function and variant constructor could match
+              // Prefer variant constructor when one exists with matching count
+              variantMatch match {
+                case Some((typeName, varTps, varParamTypes)) =>
+                  // Variant constructor takes precedence (it's a more specific/local binding)
+                  targs.foreach(checkType(_, env))
+                  val subst = (varTps zip targs).toMap
+                  val substParamTypes = varParamTypes.map(substituteType(_, subst))
+                  val resultType = AppT(typeName, targs)
+                  if (varParamTypes.isEmpty) resultType
+                  else ArrowT(substParamTypes, resultType)
+                case None =>
+                  // Only function matches
+                  targs.foreach(checkType(_, env))
+                  val subst = (tps zip targs).toMap
+                  val substParamTypes = paramTypes.map(substituteType(_, subst))
+                  val substRtype = substituteType(rtype, subst)
+                  ArrowT(substParamTypes, substRtype)
+              }
+            }
           case None =>
-            // Check in variable environment
-            env.tenv.get(name) match {
-              case Some(SimpleEntry(typ, _)) =>
-                if (targs.nonEmpty) error(s"non-polymorphic $name cannot take type arguments")
-                typ
-              case Some(PolyEntry(tps, paramTypes, rtype)) =>
-                // Polymorphic function
-                if (targs.isEmpty) error(s"type arguments required for polymorphic function $name")
+            // Check in variant constructors
+            env.varEnv.get(name) match {
+              case Some((typeName, tps, paramTypes)) =>
+                // It's a variant constructor
+                if (targs.isEmpty && tps.nonEmpty) error(s"type arguments required for $name")
                 if (targs.length != tps.length) error(s"wrong number of type arguments for $name")
                 targs.foreach(checkType(_, env))
                 val subst = (tps zip targs).toMap
                 val substParamTypes = paramTypes.map(substituteType(_, subst))
-                val substRtype = substituteType(rtype, subst)
-                ArrowT(substParamTypes, substRtype)
+                val resultType = AppT(typeName, targs)
+                if (paramTypes.isEmpty) resultType
+                else ArrowT(substParamTypes, resultType)
               case None => error(s"free identifier: $name")
             }
         }
