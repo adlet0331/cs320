@@ -259,7 +259,23 @@ object Implementation extends Template {
         }
         
         // Now check the body expression
-        typeCheck(body, fullEnv)
+        val bodyType = typeCheck(body, fullEnv)
+        
+        // Special check: if the body is a bare Id that matches a type name
+        // defined in this RecBinds with a single nullary variant of the same name,
+        // it's an error (ambiguous)
+        body match {
+          case Id(name, Nil) =>
+            typeDefsToAdd.find(_.name == name) match {
+              case Some(td) if td.tparams.isEmpty && td.variants.length == 1 &&
+                              td.variants.head.name == name && td.variants.head.params.isEmpty =>
+                error(s"type error")
+              case _ => ()
+            }
+          case _ => ()
+        }
+        
+        bodyType
         
       case Match(expr, cases) =>
         val exprType = typeCheck(expr, env)
